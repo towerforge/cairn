@@ -1,0 +1,71 @@
+name: release
+
+# Triggered by `make release`, which tags v$VERSION and pushes the tag.
+# Builds Cairn for macOS (Cairn.app, both architectures) and Linux (x86_64 and
+# arm64, on native runners: the window needs the system's X11/Wayland headers,
+# so no cross), writes checksums.txt and publishes a GitHub release with the
+# archives that install.sh and `cairn update` download.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin,      os: macos-latest }
+          - { target: x86_64-apple-darwin,       os: macos-latest }
+          # 22.04: glibc 2.35, so the binary also runs on older distributions
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - if: runner.os == 'Linux'
+        name: Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
+            libxcb1-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+      - name: Package
+        run: make package CARGO_TARGET=${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check that the tag matches VERSION and Cargo.toml
+        run: |
+          test "v$(cat VERSION)" = "$GITHUB_REF_NAME"
+          grep -q "^version = \"$(cat VERSION)\"" Cargo.toml
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: make checksums && cat dist/checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          generate_release_notes: true

@@ -1,0 +1,48 @@
+[package]
+name = "cairn"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Cairn — block-based terminal for macOS and Linux"
+repository = "https://github.com/towerforge/cairn"
+publish = false
+
+[dependencies]
+ratatui = "0.30"
+portable-pty = "0.9"
+vt100 = "0.16"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+# Only for importing the database from earlier versions (see `legacy-db`).
+rusqlite = { version = "0.40", features = ["bundled"], optional = true }
+unicode-width = "0.2"
+dirs = "7"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+anyhow = "1"
+# `cairn update`: GitHub releases over HTTPS (blocking, rustls), the archive and its SHA-256
+ureq = "3"
+flate2 = "1"
+tar = "0.4"
+sha2 = "0.10"
+# Native window
+eframe = "0.36"
+arboard = "3"
+libc = "0.2"
+raw-window-handle = "0.6"
+
+[features]
+default = ["legacy-db"]
+# Imports the SQLite database from versions up to 0.3 the first time. Once it is
+# no longer needed, drop the feature along with rusqlite and src/store/legacy.rs.
+legacy-db = ["dep:rusqlite"]
+
+[profile.release]
+lto = true
+strip = true
+
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow", "NSButton", "NSControl", "NSColor", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }

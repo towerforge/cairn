@@ -1,0 +1,9 @@
+# Rust
+/target/
+/dist/
+
+# OS
+.DS_Store
+
+# Local tool settings (per machine)
+.claude/

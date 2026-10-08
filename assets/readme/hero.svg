@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360">
+<rect width="1200" height="360" fill="#0b0b0b"/>
+<rect x="0.5" y="0.5" width="1199" height="359" fill="none" stroke="#1c1c1c"/>
+<!-- the mark, as in assets/icons/cairn.svg -->
+<g transform="translate(160 81) scale(2.5)">
+  <polygon points="50,18 18,50 50,50" fill="#A7EBD3"/>
+  <polygon points="50,18 82,50 50,50" fill="#64D2AD"/>
+  <polygon points="18,50 50,82 50,50" fill="#10B981"/>
+  <polygon points="82,50 50,82 50,50" fill="#096647"/>
+</g>
+<text x="396" y="196" font-family="'IBM Plex Mono','JetBrains Mono',Menlo,'DejaVu Sans Mono',ui-monospace,monospace" font-size="132" font-weight="700" fill="#e6e6e6">cairn</text>
+<text x="400" y="248" font-family="'IBM Plex Mono','JetBrains Mono',Menlo,'DejaVu Sans Mono',ui-monospace,monospace" font-size="23" fill="#8b93a3">A block-based terminal for macOS and Linux.</text>
+<g font-family="'IBM Plex Mono','JetBrains Mono',Menlo,'DejaVu Sans Mono',ui-monospace,monospace" font-size="16" fill="#64d2ad">
+  <rect x="396" y="288" width="191" height="34" rx="6" fill="#141414" stroke="#2c2c2c"/><text x="410" y="311">blocks + terminal</text>
+  <rect x="605" y="288" width="153" height="34" rx="6" fill="#141414" stroke="#2c2c2c"/><text x="619" y="311">native window</text>
+  <rect x="776" y="288" width="220" height="34" rx="6" fill="#141414" stroke="#2c2c2c"/><text x="790" y="311">Rust · self-updating</text>
+</g>
+</svg>
