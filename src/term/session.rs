@@ -85,6 +85,11 @@ impl Session {
         let _ = self.writer.flush();
     }
 
+    /// Terminal height the program sees.
+    pub fn rows(&self) -> usize {
+        self.size.0 as usize
+    }
+
     pub fn resize(&mut self, rows: u16, cols: u16) {
         let (rows, cols) = (rows.max(2), cols.max(10));
         if self.size == (rows, cols) {

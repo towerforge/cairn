@@ -180,6 +180,9 @@ impl Tab {
                     if self.state == CmdState::Running
                         && let Some(b) = self.blocks.last_mut()
                     {
+                        // The block's screen is as tall as the PTY, so
+                        // programs that address rows redraw where they expect.
+                        b.out.set_rows(self.session.rows());
                         b.out.feed(&d);
                         if b.strip_echo && b.out.row > 0 {
                             b.strip_echo = false;

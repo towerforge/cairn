@@ -33,6 +33,7 @@ const CONFIG_HEADER: &str = "\
 # The app rewrites this file when adding or deleting: comments are not kept.
 #
 # update_check = false   # do not ask GitHub for new releases at startup
+# default_profile = \"work\"   # the first tab opens with this profile
 #
 # [[profiles]]
 # name = \"work\"
@@ -75,6 +76,9 @@ struct Config {
     /// Ask GitHub once a day, at startup, whether there is a newer release.
     /// First: TOML wants plain values before the tables.
     update_check: bool,
+    /// Profile the first tab opens with when the app starts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_profile: Option<String>,
     profiles: Vec<Profile>,
     snippets: Vec<Snippet>,
 }
@@ -83,6 +87,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             update_check: true,
+            default_profile: None,
             profiles: Vec::new(),
             snippets: Vec::new(),
         }
@@ -160,6 +165,47 @@ impl Store {
 
     pub fn delete_profile(&mut self, name: &str) -> anyhow::Result<()> {
         self.config.profiles.retain(|p| p.name != name);
+        if self.config.default_profile.as_deref() == Some(name) {
+            self.config.default_profile = None;
+        }
+        self.save_config()
+    }
+
+    /// Edits the profile called `old` in place (same position in the list).
+    /// It can be renamed, but not onto another profile's name; if it was the
+    /// startup profile, it still is.
+    pub fn edit_profile(
+        &mut self,
+        old: &str,
+        name: &str,
+        shell: &str,
+        cwd: &str,
+    ) -> anyhow::Result<()> {
+        if name != old && self.profile(name).is_some() {
+            anyhow::bail!("a profile called {name} already exists");
+        }
+        let Some(p) = self.config.profiles.iter_mut().find(|p| p.name == old) else {
+            anyhow::bail!("the profile {old} no longer exists");
+        };
+        *p = Profile {
+            name: name.into(),
+            shell: shell.into(),
+            cwd: cwd.into(),
+        };
+        if self.config.default_profile.as_deref() == Some(old) {
+            self.config.default_profile = Some(name.into());
+        }
+        self.save_config()
+    }
+
+    /// The profile the first tab opens with, if one is set and still exists.
+    pub fn default_profile(&self) -> Option<&Profile> {
+        self.profile(self.config.default_profile.as_deref()?)
+    }
+
+    /// Makes `name` the startup profile; `None` goes back to the plain shell.
+    pub fn set_default_profile(&mut self, name: Option<&str>) -> anyhow::Result<()> {
+        self.config.default_profile = name.map(str::to_string);
         self.save_config()
     }
 
@@ -167,6 +213,22 @@ impl Store {
 
     pub fn snippets(&self) -> &[Snippet] {
         &self.config.snippets
+    }
+
+    /// Edits the snippet labelled `old` in place; it can be relabelled, but
+    /// not onto another snippet's label.
+    pub fn edit_snippet(&mut self, old: &str, label: &str, command: &str) -> anyhow::Result<()> {
+        if label != old && self.config.snippets.iter().any(|s| s.label == label) {
+            anyhow::bail!("a snippet called {label} already exists");
+        }
+        let Some(s) = self.config.snippets.iter_mut().find(|s| s.label == old) else {
+            anyhow::bail!("the snippet {old} no longer exists");
+        };
+        *s = Snippet {
+            label: label.into(),
+            command: command.into(),
+        };
+        self.save_config()
     }
 
     /// Adds a snippet; if one with that label exists, replaces it.
@@ -359,6 +421,61 @@ mod tests {
         s.delete_snippet("logs").unwrap();
         let s = open(&paths);
         assert!(s.profiles().is_empty() && s.snippets().is_empty());
+    }
+
+    #[test]
+    fn editing_keeps_the_place_and_follows_a_rename() {
+        let paths = scratch("edit");
+        let mut s = open(&paths);
+        s.add_profile("work", "/bin/zsh", "~/Offing").unwrap();
+        s.add_profile("home", "/bin/bash", "~").unwrap();
+        s.set_default_profile(Some("work")).unwrap();
+        s.edit_profile("work", "office", "/bin/fish", "~/Towerforge")
+            .unwrap();
+        // Onto another profile's name: refused, nothing changes.
+        assert!(s.edit_profile("home", "office", "/bin/sh", "/").is_err());
+
+        let mut s = open(&paths);
+        let names: Vec<&str> = s.profiles().iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["office", "home"]);
+        let d = s.default_profile().unwrap();
+        assert_eq!((d.name.as_str(), d.shell.as_str()), ("office", "/bin/fish"));
+        assert_eq!(s.profile("home").unwrap().shell, "/bin/bash");
+
+        s.add_snippet("logs", "make logs").unwrap();
+        s.add_snippet("up", "make up").unwrap();
+        s.edit_snippet("logs", "logs", "make logs -f").unwrap();
+        assert!(s.edit_snippet("up", "logs", "x").is_err());
+        let s = open(&paths);
+        assert_eq!(s.snippets()[0].command, "make logs -f");
+        assert_eq!(s.snippets()[1].label, "up");
+    }
+
+    #[test]
+    fn the_default_profile_survives_a_reopen_and_goes_with_its_profile() {
+        let paths = scratch("default-profile");
+        let mut s = open(&paths);
+        assert!(s.default_profile().is_none());
+        s.add_profile("work", "/bin/zsh", "~/Offing").unwrap();
+        s.add_profile("home", "/bin/bash", "~").unwrap();
+        s.set_default_profile(Some("work")).unwrap();
+        let text = fs::read_to_string(paths.config_file()).unwrap();
+        assert!(text.contains("default_profile = \"work\""));
+
+        let mut s = open(&paths);
+        assert_eq!(
+            s.default_profile().map(|p| p.cwd.as_str()),
+            Some("~/Offing")
+        );
+        // Deleting another profile keeps it; deleting it clears it.
+        s.delete_profile("home").unwrap();
+        assert!(s.default_profile().is_some());
+        s.delete_profile("work").unwrap();
+        let s = open(&paths);
+        assert!(s.default_profile().is_none());
+        let text = fs::read_to_string(paths.config_file()).unwrap();
+        // Only the commented example in the header mentions it.
+        assert!(!text.lines().any(|l| l.starts_with("default_profile")));
     }
 
     #[test]

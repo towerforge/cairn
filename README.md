@@ -24,7 +24,8 @@
 ## Features
 
 - **Blocks.** Every command gets its own block with its output, exit code and
-  duration, under a context line such as `~/path git:(branch) 3 • +48 -12 (0.04s)`.
+  duration, under a context line such as `~/path git:(branch) 3 • +48 -12` with
+  the time on the right.
   `/copy` puts the last output on the clipboard.
 - **A real terminal when you need one.** `vim`, `htop`, `less`, `fzf`, `ssh` and
   REPLs take over the whole view while they run; when they exit, you are back to
@@ -239,6 +240,7 @@ delete one from the app, so comments are not preserved.
 
 ```toml
 update_check = true        # ask GitHub for new releases once a day
+default_profile = "work"   # the first tab opens with this profile
 
 [[profiles]]
 name = "work"

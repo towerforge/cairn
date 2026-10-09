@@ -22,7 +22,7 @@ impl PickerKind {
         }
     }
 
-    /// Supports creating and deleting items.
+    /// Supports creating, editing and deleting items.
     fn editable(self) -> bool {
         matches!(self, PickerKind::Snippets | PickerKind::Profiles)
     }
@@ -39,12 +39,15 @@ impl PickerKind {
             PickerKind::Snippets => &[
                 ("↵", "insert"),
                 ("⌃N", "new"),
+                ("⌃E", "edit"),
                 ("⌃D", "delete"),
                 ("Esc", "close"),
             ],
             PickerKind::Profiles => &[
                 ("↵", "open tab"),
+                ("⌃S", "at startup"),
                 ("⌃N", "new"),
+                ("⌃E", "edit"),
                 ("⌃D", "delete"),
                 ("Esc", "close"),
             ],
@@ -74,7 +77,10 @@ pub enum PickerAction {
     Close,
     Choose(usize),
     New,
+    Edit(usize),
     Delete(usize),
+    /// Profiles: make it the startup profile, or stop if it already is.
+    ToggleDefault(usize),
     ClearAll,
 }
 
@@ -126,9 +132,19 @@ impl Picker {
             KeyCode::Char('n') if ctrl && self.kind.editable() => {
                 return PickerAction::New;
             }
+            KeyCode::Char('e') if ctrl && self.kind.editable() => {
+                if let Some(&i) = visible.get(self.selected) {
+                    return PickerAction::Edit(i);
+                }
+            }
             KeyCode::Char('d') if ctrl && self.kind.editable() => {
                 if let Some(&i) = visible.get(self.selected) {
                     return PickerAction::Delete(i);
+                }
+            }
+            KeyCode::Char('s') if ctrl && self.kind == PickerKind::Profiles => {
+                if let Some(&i) = visible.get(self.selected) {
+                    return PickerAction::ToggleDefault(i);
                 }
             }
             KeyCode::Char('k') if ctrl && self.kind == PickerKind::History => {
@@ -158,6 +174,9 @@ pub struct Form {
     pub fields: Vec<(&'static str, LineInput)>,
     pub focus: usize,
     pub error: Option<String>,
+    /// Name (profile) or label (snippet) of the item being edited; `None`
+    /// for a new one.
+    pub editing: Option<String>,
 }
 
 pub enum FormAction {
@@ -177,7 +196,24 @@ impl Form {
             ],
             focus: 0,
             error: None,
+            editing: None,
         }
+    }
+
+    /// The form of an existing profile, filled in with it.
+    pub fn edit_profile(name: &str, shell: &str, cwd: &str) -> Self {
+        let mut f = Self::profile(shell, cwd);
+        f.fields[0].1 = LineInput::with(name);
+        f.editing = Some(name.to_string());
+        f
+    }
+
+    /// The form of an existing snippet, filled in with it.
+    pub fn edit_snippet(label: &str, command: &str) -> Self {
+        let mut f = Self::snippet(command);
+        f.fields[0].1 = LineInput::with(label);
+        f.editing = Some(label.to_string());
+        f
     }
 
     pub fn snippet(command: &str) -> Self {
@@ -189,13 +225,16 @@ impl Form {
             ],
             focus: 0,
             error: None,
+            editing: None,
         }
     }
 
     pub fn title(&self) -> &'static str {
-        match self.kind {
-            FormKind::Profile => "New profile",
-            FormKind::Snippet => "New snippet",
+        match (self.kind, self.editing.is_some()) {
+            (FormKind::Profile, false) => "New profile",
+            (FormKind::Profile, true) => "Edit profile",
+            (FormKind::Snippet, false) => "New snippet",
+            (FormKind::Snippet, true) => "Edit snippet",
         }
     }
 

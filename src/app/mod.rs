@@ -996,7 +996,16 @@ impl App {
                 .iter()
                 .map(|p| Item {
                     detail: format!(
-                        "{} · {}",
+                        "{}{} · {}",
+                        if self
+                            .store
+                            .default_profile()
+                            .is_some_and(|d| d.name == p.name)
+                        {
+                            "at startup · "
+                        } else {
+                            ""
+                        },
                         p.shell,
                         if p.cwd.is_empty() { "~" } else { &p.cwd }
                     ),
@@ -1081,6 +1090,25 @@ impl App {
                 };
                 self.overlay = Some(Overlay::Form(form));
             }
+            PickerAction::Edit(i) => {
+                let key = p.items[i].label.clone();
+                let form = match kind {
+                    PickerKind::Profiles => self
+                        .store
+                        .profile(&key)
+                        .map(|p| Form::edit_profile(&p.name, &p.shell, &p.cwd)),
+                    PickerKind::Snippets => self
+                        .store
+                        .snippets()
+                        .iter()
+                        .find(|s| s.label == key)
+                        .map(|s| Form::edit_snippet(&s.label, &s.command)),
+                    _ => None,
+                };
+                if let Some(form) = form {
+                    self.overlay = Some(Overlay::Form(form));
+                }
+            }
             PickerAction::Delete(i) => {
                 let key = p.items[i].label.clone();
                 let res = match kind {
@@ -1090,6 +1118,17 @@ impl App {
                 };
                 if let Err(e) = res {
                     self.flash(format!("could not delete: {e}"));
+                }
+                self.refresh_picker();
+            }
+            PickerAction::ToggleDefault(i) => {
+                let name = p.items[i].label.clone();
+                let is_default = self.store.default_profile().is_some_and(|d| d.name == name);
+                let new = (!is_default).then_some(name.as_str());
+                match self.store.set_default_profile(new) {
+                    Ok(()) if is_default => self.flash("Cairn starts with a plain shell again"),
+                    Ok(()) => self.flash(format!("Cairn starts with the profile {name}")),
+                    Err(e) => self.flash(format!("could not save: {e}")),
                 }
                 self.refresh_picker();
             }
@@ -1131,7 +1170,10 @@ impl App {
                 } else {
                     shell_path
                 };
-                self.store.add_profile(&name, &shell_path, &cwd)
+                match &f.editing {
+                    Some(old) => self.store.edit_profile(old, &name, &shell_path, &cwd),
+                    None => self.store.add_profile(&name, &shell_path, &cwd),
+                }
             }
             FormKind::Snippet => {
                 let (label, command) = (f.value(0), f.value(1));
@@ -1144,7 +1186,10 @@ impl App {
                 } else {
                     label
                 };
-                self.store.add_snippet(&label, &command)
+                match &f.editing {
+                    Some(old) => self.store.edit_snippet(old, &label, &command),
+                    None => self.store.add_snippet(&label, &command),
+                }
             }
         };
         let kind = picker_for(f.kind);

@@ -1,6 +1,6 @@
 //! macOS-specific window tweaks (AppKit).
 
-use objc2_app_kit::{NSColor, NSTitlebarSeparatorStyle, NSView, NSWindowButton};
+use objc2_app_kit::{NSColor, NSTitlebarSeparatorStyle, NSView, NSWindowButton, NSWindowStyleMask};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -28,6 +28,10 @@ pub fn round_corners(frame: &eframe::Frame, radius: f64) -> bool {
         return false;
     };
     layer.setCornerRadius(radius);
+    // Continuous corners (the curvature eases in from the edges), like the
+    // system's own windows, instead of plain circular arcs.
+    // SAFETY: a constant string exported by Core Animation.
+    layer.setCornerCurve(unsafe { objc2_quartz_core::kCACornerCurveContinuous });
     layer.setMasksToBounds(true);
     window.invalidateShadow();
     true
@@ -37,8 +41,15 @@ pub fn round_corners(frame: &eframe::Frame, radius: f64) -> bool {
 /// close/minimize/zoom buttons in it (what Electron does with
 /// `trafficLightPosition`). AppKit repositions them on resize, so this is
 /// called every frame; it only touches the window if something changed.
-/// Returns the right edge of the last button, in points.
-pub fn center_traffic_lights(frame: &eframe::Frame, height: f32) -> Option<f64> {
+///
+/// In full screen it does nothing: AppKit moves the buttons into the bar that
+/// slides down when the pointer reaches the top of the screen, and placing
+/// them relative to our window would push them off that bar.
+pub fn center_traffic_lights(frame: &eframe::Frame, height: f32) {
+    let _ = place_traffic_lights(frame, height);
+}
+
+fn place_traffic_lights(frame: &eframe::Frame, height: f32) -> Option<()> {
     let handle = frame.window_handle().ok()?;
     let RawWindowHandle::AppKit(h) = handle.as_raw() else {
         return None;
@@ -47,6 +58,9 @@ pub fn center_traffic_lights(frame: &eframe::Frame, height: f32) -> Option<f64> 
     // window exists, and this runs on the main thread.
     let view: &NSView = unsafe { h.ns_view.cast().as_ref() };
     let window = view.window()?;
+    if window.styleMask().contains(NSWindowStyleMask::FullScreen) {
+        return None;
+    }
     let height = height as f64;
     let close = window.standardWindowButton(NSWindowButton::CloseButton)?;
     // button → NSTitlebarView → NSTitlebarContainerView
@@ -59,7 +73,6 @@ pub fn center_traffic_lights(frame: &eframe::Frame, height: f32) -> Option<f64> 
             NSSize::new(c.size.width, height),
         ));
     }
-    let mut right = 0.0f64;
     for (i, kind) in [
         NSWindowButton::CloseButton,
         NSWindowButton::MiniaturizeButton,
@@ -81,7 +94,6 @@ pub fn center_traffic_lights(frame: &eframe::Frame, height: f32) -> Option<f64> 
         if (f.origin.x - x).abs() > 0.5 || (f.origin.y - y).abs() > 0.5 {
             button.setFrameOrigin(NSPoint::new(x, y));
         }
-        right = right.max(x + f.size.width);
     }
-    Some(right)
+    Some(())
 }
