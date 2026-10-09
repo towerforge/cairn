@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Cairn
+GenericName=Terminal
+Comment=Block-based terminal
+Exec=cairn
+Icon=cairn
+Terminal=false
+Categories=System;TerminalEmulator;Development;
+Keywords=terminal;shell;console;
+StartupWMClass=cairn
