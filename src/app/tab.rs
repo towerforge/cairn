@@ -132,9 +132,6 @@ impl Tab {
     }
 
     pub fn title(&self) -> String {
-        if let Some(name) = &self.profile_name {
-            return name.clone();
-        }
         folder_name(&self.cwd)
     }
 

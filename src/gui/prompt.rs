@@ -190,7 +190,22 @@ impl Gui {
             hints.push(("/update", v));
         }
         let hy = in_y + 10.0 + 10.0 + 8.0;
-        paint_hints(&p, Pos2::new(tx, hy), &hints);
+        let mut hx = tx;
+        // The tab's profile, left of the shortcuts; hidden with a list open.
+        if let Some(name) = &tab.profile_name
+            && !completion_open
+            && !palette_open
+        {
+            let r = p.text(
+                Pos2::new(hx, hy),
+                Align2::LEFT_CENTER,
+                format!("⏵⏵ {name}"),
+                mono(SMALL_SIZE),
+                ACCENT,
+            );
+            hx = r.right() + 16.0;
+        }
+        paint_hints(&p, Pos2::new(hx, hy), &hints);
     }
 }
 
