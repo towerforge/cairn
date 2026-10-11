@@ -195,7 +195,28 @@ impl Store {
         if self.config.default_profile.as_deref() == Some(old) {
             self.config.default_profile = Some(name.into());
         }
-        self.save_config()
+        self.save_config()?;
+        if name != old {
+            self.rename_history(old, name)?;
+        }
+        Ok(())
+    }
+
+    /// Moves the history of the profile `old` to `name`.
+    fn rename_history(&mut self, old: &str, name: &str) -> anyhow::Result<()> {
+        let mut changed = false;
+        for h in self
+            .history
+            .iter_mut()
+            .filter(|h| h.profile.as_deref() == Some(old))
+        {
+            h.profile = Some(name.into());
+            changed = true;
+        }
+        if changed {
+            write_history(&self.paths.history_file(), &self.history)?;
+        }
+        Ok(())
     }
 
     /// The profile the first tab opens with, if one is set and still exists.
@@ -248,9 +269,13 @@ impl Store {
 
     // ── History ──────────────────────────────────────────────────────────────
 
-    /// Newest to oldest.
-    pub fn history(&self) -> impl Iterator<Item = &HistoryEntry> {
-        self.history.iter().rev()
+    /// History of a profile (`None`: commands run without one), newest to
+    /// oldest.
+    pub fn history(&self, profile: Option<&str>) -> impl Iterator<Item = &HistoryEntry> {
+        self.history
+            .iter()
+            .rev()
+            .filter(move |h| h.profile.as_deref() == profile)
     }
 
     pub fn add_history(
@@ -270,9 +295,11 @@ impl Store {
         Ok(())
     }
 
-    pub fn clear_history(&mut self) -> anyhow::Result<()> {
-        self.history.clear();
-        write_history(&self.paths.history_file(), &[])
+    /// Clears the history of a profile (`None`: the one without a profile);
+    /// the rest is kept.
+    pub fn clear_history(&mut self, profile: Option<&str>) -> anyhow::Result<()> {
+        self.history.retain(|h| h.profile.as_deref() != profile);
+        write_history(&self.paths.history_file(), &self.history)
     }
 
     fn save_config(&self) -> anyhow::Result<()> {
@@ -497,16 +524,41 @@ mod tests {
         let paths = scratch("history");
         let mut s = open(&paths);
         s.add_history(None, "ls", Some("/tmp")).unwrap();
+        s.add_history(None, "pwd", Some("/tmp")).unwrap();
+
+        let mut s = open(&paths);
+        let cmds: Vec<_> = s.history(None).map(|h| h.command.as_str()).collect();
+        assert_eq!(cmds, ["pwd", "ls"]);
+
+        s.clear_history(None).unwrap();
+        assert_eq!(open(&paths).history(None).count(), 0);
+    }
+
+    #[test]
+    fn each_profile_has_its_own_history() {
+        let paths = scratch("history-profiles");
+        let mut s = open(&paths);
+        s.add_profile("work", "/bin/zsh", "~").unwrap();
+        s.add_history(None, "ls", None).unwrap();
         s.add_history(Some("work"), "make check", None).unwrap();
 
-        let s = open(&paths);
-        let cmds: Vec<_> = s.history().map(|h| h.command.as_str()).collect();
-        assert_eq!(cmds, ["make check", "ls"]);
-        assert_eq!(s.history().next().unwrap().profile.as_deref(), Some("work"));
+        let mut s = open(&paths);
+        let cmds =
+            |s: &Store, p| -> Vec<String> { s.history(p).map(|h| h.command.clone()).collect() };
+        assert_eq!(cmds(&s, None), ["ls"]);
+        assert_eq!(cmds(&s, Some("work")), ["make check"]);
 
-        let mut s = s;
-        s.clear_history().unwrap();
-        assert_eq!(open(&paths).history().count(), 0);
+        // Renaming the profile carries its history over.
+        s.edit_profile("work", "office", "/bin/zsh", "~").unwrap();
+        let mut s = open(&paths);
+        assert_eq!(cmds(&s, Some("work")), Vec::<String>::new());
+        assert_eq!(cmds(&s, Some("office")), ["make check"]);
+
+        // Clearing one profile keeps the rest.
+        s.clear_history(Some("office")).unwrap();
+        let s = open(&paths);
+        assert_eq!(cmds(&s, Some("office")), Vec::<String>::new());
+        assert_eq!(cmds(&s, None), ["ls"]);
     }
 
     #[test]
@@ -520,9 +572,9 @@ mod tests {
         fs::write(paths.history_file(), text).unwrap();
 
         let s = open(&paths);
-        assert_eq!(s.history().count(), HISTORY_MAX);
+        assert_eq!(s.history(None).count(), HISTORY_MAX);
         assert_eq!(
-            s.history().next().unwrap().command,
+            s.history(None).next().unwrap().command,
             format!("c{}", HISTORY_MAX + 4)
         );
         // The file ends up trimmed and without the broken line.
@@ -560,9 +612,9 @@ mod tests {
         let s = open(&paths);
         assert_eq!(s.profile("work").map(|p| p.cwd.as_str()), Some("~/Offing"));
         assert_eq!(s.snippets()[0].command, "make logs");
-        let h: Vec<_> = s.history().collect();
-        assert_eq!(h[0].command, "make check");
-        assert_eq!(h[0].profile.as_deref(), Some("work"));
-        assert_eq!(h[1].cwd.as_deref(), Some("/tmp"));
+        let work: Vec<_> = s.history(Some("work")).collect();
+        assert_eq!(work[0].command, "make check");
+        let none: Vec<_> = s.history(None).collect();
+        assert_eq!(none[0].cwd.as_deref(), Some("/tmp"));
     }
 }

@@ -661,7 +661,7 @@ impl App {
         }
         let mut seen = std::collections::HashSet::new();
         self.store
-            .history()
+            .history(self.tab().profile_name.as_deref())
             .filter(|h| h.command.starts_with(typed) && h.command != typed)
             .filter(|h| seen.insert(h.command.as_str()))
             .take(30)
@@ -962,7 +962,7 @@ impl App {
             PickerKind::History => {
                 let mut seen = std::collections::HashSet::new();
                 self.store
-                    .history()
+                    .history(self.tab().profile_name.as_deref())
                     .filter(|h| seen.insert(h.command.as_str()))
                     .map(|h| Item {
                         detail: format!(
@@ -1133,7 +1133,8 @@ impl App {
                 self.refresh_picker();
             }
             PickerAction::ClearAll => {
-                if let Err(e) = self.store.clear_history() {
+                let profile = self.tab().profile_name.clone();
+                if let Err(e) = self.store.clear_history(profile.as_deref()) {
                     self.flash(format!("could not clear history: {e}"));
                 }
                 self.refresh_picker();
@@ -1171,7 +1172,17 @@ impl App {
                     shell_path
                 };
                 match &f.editing {
-                    Some(old) => self.store.edit_profile(old, &name, &shell_path, &cwd),
+                    Some(old) => {
+                        let res = self.store.edit_profile(old, &name, &shell_path, &cwd);
+                        // Open tabs follow the rename, so their history does too.
+                        if res.is_ok() {
+                            self.tabs
+                                .iter_mut()
+                                .filter(|t| t.profile_name.as_ref() == Some(old))
+                                .for_each(|t| t.profile_name = Some(name.clone()));
+                        }
+                        res
+                    }
                     None => self.store.add_profile(&name, &shell_path, &cwd),
                 }
             }
