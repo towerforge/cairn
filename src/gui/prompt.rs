@@ -172,8 +172,7 @@ impl Gui {
 
         // Shortcuts depending on state.
         // With a list open, the footer stays clean.
-        let update = self.app.update_available.as_ref().map(|v| format!("v{v}"));
-        let mut hints: Vec<(&str, &str)> = if completion_open || palette_open {
+        let hints: Vec<(&str, &str)> = if completion_open || palette_open {
             vec![]
         } else if busy {
             vec![("⌃C", "interrupt"), ("⌃G", "menu")]
@@ -182,13 +181,6 @@ impl Gui {
         } else {
             vec![("/help", "commands"), ("/snippets", ""), ("/profiles", "")]
         };
-        // A newer release, until it is installed: next to the rest.
-        if let Some(v) = &update
-            && !hints.is_empty()
-            && !busy
-        {
-            hints.push(("/update", v));
-        }
         let hy = in_y + 10.0 + 10.0 + 8.0;
         let mut hx = tx;
         // The tab's profile, left of the shortcuts; hidden with a list open.

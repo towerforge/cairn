@@ -14,7 +14,8 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModif
 use ratatui::layout::Rect;
 
 use crate::app::overlay::{
-    Form, FormAction, FormKind, Item, Overlay, Picker, PickerAction, PickerKind,
+    Form, FormAction, FormKind, Item, Overlay, Picker, PickerAction, PickerKind, UpdateAction,
+    UpdatePrompt,
 };
 use crate::app::tab::{CmdState, Focus, Tab, short_path};
 use crate::edit::editor::{Editor, EditorAction};
@@ -383,8 +384,15 @@ impl App {
         use crate::update::Notice;
         match notice {
             Notice::Available(v) => {
-                self.flash(format!("Cairn v{v} is available · /update installs it"));
+                self.flash(format!("Cairn v{v} is available"));
                 self.update_available = Some(v);
+            }
+            Notice::Notes(v, notes) => {
+                if let Some(Overlay::Update(p)) = self.overlay.as_mut()
+                    && p.version == v
+                {
+                    p.notes = Some(notes);
+                }
             }
             Notice::Progress(text) => self.flash(text),
             Notice::Done(result) => {
@@ -400,9 +408,30 @@ impl App {
         }
     }
 
-    /// `/update`: installs the latest release on a thread; the messages come
+    pub fn updating(&self) -> bool {
+        self.updating
+    }
+
+    /// The title bar button: the newer release and its notes, to confirm
+    /// before installing. Not while another overlay is open or it installs.
+    pub fn open_update_prompt(&mut self) {
+        if self.overlay.is_some() || self.updating {
+            return;
+        }
+        let Some(version) = self.update_available.clone() else {
+            return;
+        };
+        crate::update::spawn_notes(self.sink.clone(), version.clone());
+        self.overlay = Some(Overlay::Update(UpdatePrompt {
+            version,
+            notes: None,
+            scroll: 0,
+        }));
+    }
+
+    /// `/update` or the update prompt: installs the latest release on a thread; the messages come
     /// back as `AppEvent::Update`.
-    fn start_update(&mut self) {
+    pub fn start_update(&mut self) {
         if self.updating {
             self.flash("an update is already running");
             return;
@@ -716,9 +745,16 @@ impl App {
             if down { KeyCode::Down } else { KeyCode::Up },
             KeyModifiers::NONE,
         );
-        if let Some(Overlay::Picker(p)) = self.overlay.as_mut() {
-            p.handle_key(arrow);
-            return true;
+        match self.overlay.as_mut() {
+            Some(Overlay::Picker(p)) => {
+                p.handle_key(arrow);
+                return true;
+            }
+            Some(Overlay::Update(p)) => {
+                p.handle_key(arrow);
+                return true;
+            }
+            _ => {}
         }
         if self.overlay.is_some() {
             return false;
@@ -1036,6 +1072,14 @@ impl App {
                 }
                 FormAction::Submit => self.submit_form(),
             },
+            Some(Overlay::Update(p)) => match p.handle_key(k) {
+                UpdateAction::None => {}
+                UpdateAction::Cancel => self.overlay = None,
+                UpdateAction::Install => {
+                    self.overlay = None;
+                    self.start_update();
+                }
+            },
             None => {}
         }
     }
@@ -1226,6 +1270,7 @@ impl App {
                     .insert_str(&text.replace(['\r', '\n'], " "));
                 return;
             }
+            Some(Overlay::Update(_)) => return,
             None => {}
         }
         let tab = self.tab_mut();

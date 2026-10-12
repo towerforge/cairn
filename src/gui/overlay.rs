@@ -1,5 +1,5 @@
-//! Windows over the blocks: pickers (history, snippets, profiles), forms
-//! and the ⌃G prefix menu. The rest of the window dims while a modal is open.
+//! Windows over the blocks: pickers (history, snippets, profiles), forms,
+//! the update prompt and the ⌃G prefix menu. The rest of the window dims while a modal is open.
 
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, Frame, Id, LayerId, Order, Pos2, Rect, Sense, Shadow,
@@ -7,15 +7,16 @@ use eframe::egui::{
 };
 use ratatui::crossterm::event::{KeyCode, KeyModifiers};
 
-use crate::app::overlay::{Form, Overlay, Picker};
+use crate::app::overlay::{Form, Overlay, Picker, UpdatePrompt};
 
 use super::Gui;
 
 /// Nominal corner radius of the modals.
 const MODAL_RADIUS: f32 = 12.0;
 use super::theme::{
-    ACCENT, BORDER, BORDER2, BRIGHT, FG, FIELD, FIELD_BORDER, HOVER, META, PAD, PROMPT_H, RAISED,
-    RED, RULE, SELECTED, SMALL_SIZE, SUBTLE, TEXT_SIZE, TEXT2, YELLOW, bold, mono,
+    ACCENT, BORDER, BORDER2, BRIGHT, FG, FIELD, FIELD_BORDER, HOVER, META, ON_ACCENT, PAD,
+    PROMPT_H, RAISED, RED, RULE, SELECTED, SMALL_SIZE, SUBTLE, TEXT_SIZE, TEXT2, YELLOW, bold,
+    mono,
 };
 use super::widgets::{paint_hints, paint_scrollbar, paint_selection, squircle};
 
@@ -60,6 +61,138 @@ impl Gui {
             form_contents(ui, f, size);
         });
     }
+
+    /// The buttons answer as the keys would: `Enter` installs, `Esc` closes.
+    /// The notes scroll when they do not fit in 80 % of the window.
+    pub(super) fn draw_update_prompt(&mut self, ctx: &egui::Context) {
+        let screen = ctx.content_rect();
+        let Some(Overlay::Update(u)) = self.app.overlay.as_mut() else {
+            return;
+        };
+        let lines = match &u.notes {
+            Some(Ok(l)) if !l.is_empty() => l.len(),
+            _ => 1,
+        };
+        let fit = ((screen.height() * 0.8 - UPDATE_CHROME_H) / UPDATE_LINE_H).max(3.0) as usize;
+        let rows = lines.min(fit);
+        u.scroll = u.scroll.min(lines - rows);
+        let size = Vec2::new(560.0, UPDATE_CHROME_H + rows as f32 * UPDATE_LINE_H);
+        let mut answer = None;
+        let mut area = Rect::NOTHING;
+        overlay_area(
+            ctx,
+            "update",
+            Align2::CENTER_CENTER,
+            Vec2::ZERO,
+            size,
+            |ui| {
+                area = Rect::from_min_size(ui.max_rect().min, size);
+                answer = update_contents(ui, u, size, rows);
+            },
+        );
+        self.wheel_over(ctx, area);
+        if let Some(code) = answer {
+            self.key(code, KeyModifiers::NONE);
+        }
+    }
+}
+
+const UPDATE_LINE_H: f32 = 22.0;
+/// Height of the update prompt without its note lines: title and footer.
+const UPDATE_CHROME_H: f32 = 128.0;
+
+/// Update prompt contents, with `rows` note lines on screen. Returns the key
+/// a button stands for, if clicked.
+fn update_contents(ui: &mut Ui, u: &UpdatePrompt, size: Vec2, rows: usize) -> Option<KeyCode> {
+    let rect = Rect::from_min_size(ui.max_rect().min, size);
+    let p = ui.painter().clone();
+    p.text(
+        Pos2::new(rect.left() + 18.0, rect.top() + 26.0),
+        Align2::LEFT_CENTER,
+        format!("Install Cairn v{}", u.version),
+        bold(TEXT_SIZE),
+        ACCENT,
+    );
+    p.hline(rect.x_range(), rect.top() + 50.0, Stroke::new(1.0, BORDER));
+
+    let total = match &u.notes {
+        Some(Ok(l)) => l.len(),
+        _ => 0,
+    };
+    // If not all fit, the scrollbar goes to the right of the lines.
+    let scrolls = total > rows;
+    let x = rect.left() + 18.0;
+    let width = rect.width() - 36.0 - if scrolls { 14.0 } else { 0.0 };
+    let first = rect.top() + 72.0;
+    let line = |i: usize, text: &str, color: Color32| {
+        let mut job =
+            LayoutJob::single_section(text.to_string(), TextFormat::simple(mono(TEXT_SIZE), color));
+        job.wrap.max_width = width;
+        job.wrap.max_rows = 1;
+        let g = ui.fonts_mut(|f| f.layout_job(job));
+        let y = first + i as f32 * UPDATE_LINE_H;
+        p.galley(Pos2::new(x, y - g.size().y / 2.0), g, color);
+    };
+    match &u.notes {
+        None => line(0, "Loading release notes…", META),
+        Some(Err(e)) => line(0, &format!("Could not load the release notes: {e}"), RED),
+        Some(Ok(l)) if l.is_empty() => line(0, "No release notes.", META),
+        Some(Ok(l)) => {
+            for (i, text) in l.iter().skip(u.scroll).take(rows).enumerate() {
+                line(i, text, FG);
+            }
+        }
+    }
+    if scrolls {
+        let track = Rect::from_min_size(
+            Pos2::new(rect.right() - 18.0 - 3.0, first - UPDATE_LINE_H / 2.0),
+            Vec2::new(3.0, rows as f32 * UPDATE_LINE_H),
+        );
+        paint_scrollbar(&p, track, total, rows, u.scroll);
+    }
+
+    // Footer: hints on the left, buttons on the right.
+    let cy = rect.bottom() - 26.0;
+    let hints: &[(&str, &str)] = if scrolls {
+        &[("↵", "install"), ("↑↓", "scroll"), ("Esc", "cancel")]
+    } else {
+        &[("↵", "install"), ("Esc", "cancel")]
+    };
+    paint_hints(&p, Pos2::new(rect.left() + 18.0, cy), hints);
+    let mut right = rect.right() - 18.0;
+    let mut button = |label: &str, primary: bool, id: &str| {
+        let g = p.layout_no_wrap(label.into(), bold(SMALL_SIZE), FG);
+        let w = g.size().x + 28.0;
+        let r = Rect::from_min_size(Pos2::new(right - w, cy - 14.0), Vec2::new(w, 28.0));
+        right = r.left() - 10.0;
+        let resp = ui.interact(r, Id::new(("update-btn", id)), Sense::click());
+        let hovered = resp.hovered();
+        let (fill, stroke, text) = match (primary, hovered) {
+            (true, false) => (ACCENT, ACCENT, ON_ACCENT),
+            (true, true) => (TEXT2, TEXT2, ON_ACCENT),
+            (false, false) => (Color32::TRANSPARENT, RULE, SUBTLE),
+            (false, true) => (HOVER, FIELD_BORDER, TEXT2),
+        };
+        p.rect(
+            r,
+            CornerRadius::same(6),
+            fill,
+            Stroke::new(1.0, stroke),
+            egui::StrokeKind::Inside,
+        );
+        p.galley_with_override_text_color(r.center() - g.size() / 2.0, g, text);
+        if hovered {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        resp.clicked()
+    };
+    if button("Install", true, "install") {
+        return Some(KeyCode::Enter);
+    }
+    if button("Cancel", false, "cancel") {
+        return Some(KeyCode::Esc);
+    }
+    None
 }
 
 pub(super) fn dim_background(ctx: &egui::Context) {

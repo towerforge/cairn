@@ -1,4 +1,5 @@
-//! Tab bar: a pill per tab, the `+` button and the ⌃G badge. Its
+//! Tab bar: a pill per tab, the `+` button, the update button and the ⌃G
+//! badge. Its
 //! background moves the window; a double click maximizes it.
 
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use eframe::egui::{
 
 use super::Gui;
 use super::theme::{
-    ACCENT, ACTIVE_TAB, BORDER, CLOSE_HOVER, FG, HOVER, META, ON_ACCENT, SMALL_SIZE, SUBTLE,
+    ACCENT, ACTIVE_TAB, BORDER, CLOSE_HOVER, FG, HOVER, META, ON_ACCENT, RULE, SMALL_SIZE, SUBTLE,
     TAB_CLOSE_W, TEXT_SIZE, TEXT2, TRAFFIC_LIGHTS_W, bold, mono,
 };
 
@@ -43,6 +44,16 @@ impl Gui {
         let mut x = rect.left() + inset;
         let cy = rect.center().y;
 
+        // Right side, from the edge inwards: the ⌃G badge, then the update
+        // button. Tabs stop before them.
+        let mut right = rect.right() - 14.0;
+        if self.app.prefix {
+            right = self.draw_prefix_badge(ui, right, cy) - 8.0;
+        }
+        if self.app.update_available.is_some() {
+            right = self.draw_update_button(ui, right, cy) - 8.0;
+        }
+
         let mut clicked = None;
         let mut close = None;
         for (i, tab) in self.app.tabs.iter().enumerate() {
@@ -56,7 +67,7 @@ impl Gui {
             let (r, pos, galley) = pill_rect(ui, x, cy, &label, font, 14.0, 30.0);
             // Space on the right for the close × (or the busy dot).
             let r = Rect::from_min_size(r.min, Vec2::new(r.width() + TAB_CLOSE_W, r.height()));
-            if r.right() > rect.right() - 60.0 {
+            if r.right() > right - 46.0 {
                 break;
             }
             let resp = ui.interact(r, Id::new(("tab", tab.id)), Sense::click());
@@ -122,20 +133,63 @@ impl Gui {
         if resp.on_hover_text("New tab (⌘T)").clicked() {
             self.app.command('t');
         }
+    }
 
-        // Pending ⌃G prefix: a pill on the right.
-        if self.app.prefix {
-            let galley = ui
-                .painter()
-                .layout_no_wrap("⌃G".into(), bold(SMALL_SIZE), ON_ACCENT);
-            let r = Rect::from_min_size(
-                Pos2::new(rect.right() - 14.0 - galley.size().x - 16.0, cy - 11.0),
-                Vec2::new(galley.size().x + 16.0, 22.0),
-            );
-            ui.painter().rect_filled(r, CornerRadius::same(6), ACCENT);
-            ui.painter()
-                .galley(r.center() - galley.size() / 2.0, galley, ON_ACCENT);
+    /// Pending ⌃G prefix: a pill ending at `right`. Returns its left edge.
+    fn draw_prefix_badge(&self, ui: &Ui, right: f32, cy: f32) -> f32 {
+        let galley = ui
+            .painter()
+            .layout_no_wrap("⌃G".into(), bold(SMALL_SIZE), ON_ACCENT);
+        let w = galley.size().x + 16.0;
+        let r = Rect::from_min_size(Pos2::new(right - w, cy - 11.0), Vec2::new(w, 22.0));
+        ui.painter().rect_filled(r, CornerRadius::same(6), ACCENT);
+        ui.painter()
+            .galley(r.center() - galley.size() / 2.0, galley, ON_ACCENT);
+        r.left()
+    }
+
+    /// A newer release: an outlined button ending at `right` that opens the
+    /// update prompt; dimmed while the install runs. Returns its left edge.
+    fn draw_update_button(&mut self, ui: &mut Ui, right: f32, cy: f32) -> f32 {
+        let galley = ui
+            .painter()
+            .layout_no_wrap("Update".into(), bold(SMALL_SIZE), ACCENT);
+        let w = galley.size().x + 20.0;
+        let r = Rect::from_min_size(Pos2::new(right - w, cy - 12.0), Vec2::new(w, 24.0));
+        let updating = self.app.updating();
+        let resp = ui.interact(r, Id::new("update"), Sense::click());
+        let hovered = resp.hovered() && !updating;
+        let (fill, stroke, text) = if updating {
+            (Color32::TRANSPARENT, RULE, META)
+        } else if hovered {
+            (ACCENT, ACCENT, ON_ACCENT)
+        } else {
+            (Color32::TRANSPARENT, ACCENT, ACCENT)
+        };
+        ui.painter().rect(
+            r,
+            CornerRadius::same(6),
+            fill,
+            Stroke::new(1.0, stroke),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().galley_with_override_text_color(
+            r.center() - galley.size() / 2.0,
+            galley,
+            text,
+        );
+        if hovered {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
+        let tip = match (&self.app.update_available, updating) {
+            (_, true) => "Installing…".to_string(),
+            (Some(v), false) => format!("Cairn v{v} is available"),
+            (None, false) => String::new(),
+        };
+        if resp.on_hover_text(tip).clicked() && !updating {
+            self.app.open_update_prompt();
+        }
+        r.left()
     }
 }
 
