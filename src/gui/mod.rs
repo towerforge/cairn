@@ -31,6 +31,8 @@ mod fullscreen;
 mod input;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "macos")]
+mod open_folders;
 mod overlay;
 mod prompt;
 mod text;
@@ -83,6 +85,8 @@ pub fn run(store: Store) -> anyhow::Result<()> {
         ..Default::default()
     };
     let mut store = Some(store);
+    #[cfg(target_os = "macos")]
+    open_folders::listen();
     eframe::run_native(
         "Cairn",
         options,
@@ -101,12 +105,26 @@ pub fn run(store: Store) -> anyhow::Result<()> {
             let startup = store.default_profile().cloned();
             let size = ratatui::layout::Rect::new(0, 0, 120, 40);
             let mut app = App::new(store, sink, size);
+            // Folders dropped on the Dock icon to launch Cairn: a tab in each,
+            // with the login shell, instead of the startup tab.
+            #[cfg(target_os = "macos")]
+            let dropped = {
+                open_folders::set_waker(&cc.egui_ctx);
+                let mut any = false;
+                for dir in open_folders::take() {
+                    any |= app.new_tab(None, Some(dir), None);
+                }
+                any
+            };
+            #[cfg(not(target_os = "macos"))]
+            let dropped = false;
             // The startup profile, if set; otherwise the login shell here.
             // From Finder the current directory is "/": $HOME is better.
-            let opened = match startup {
-                Some(p) => app.new_tab(Some(p.shell), Some(p.cwd), Some(p.name)),
-                None => false,
-            };
+            let opened = dropped
+                || match startup {
+                    Some(p) => app.new_tab(Some(p.shell), Some(p.cwd), Some(p.name)),
+                    None => false,
+                };
             let cwd = std::env::current_dir()
                 .ok()
                 .filter(|p| p.as_os_str() != "/")
@@ -171,9 +189,13 @@ impl eframe::App for Gui {
         #[cfg(not(target_os = "macos"))]
         let _ = frame;
 
-        // 1. PTY output and periodic tasks.
+        // 1. PTY output, folders dropped on the Dock icon and periodic tasks.
         while let Ok(ev) = self.rx.try_recv() {
             self.app.handle(ev);
+        }
+        #[cfg(target_os = "macos")]
+        for dir in open_folders::take() {
+            self.app.new_tab(None, Some(dir), None);
         }
         self.app.tick();
 
@@ -286,6 +308,7 @@ impl Gui {
         match self.app.overlay {
             Some(Overlay::Picker(_)) => self.draw_picker(&ctx),
             Some(Overlay::Form(_)) => self.draw_form(&ctx),
+            Some(Overlay::Update(_)) => self.draw_update_prompt(&ctx),
             None => {}
         }
         if self.app.prefix {

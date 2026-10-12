@@ -1,6 +1,6 @@
 [package]
 name = "cairn"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Cairn — block-based terminal for macOS and Linux"
@@ -43,6 +43,8 @@ strip = true
 
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSView", "NSWindow", "NSButton", "NSControl", "NSColor", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSView", "NSWindow", "NSButton", "NSControl", "NSColor", "objc2-core-foundation", "objc2-quartz-core"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+# NSAppleEvent*, NSNotification, NSURL: folders dropped on the Dock icon (gui/open_folders.rs).
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSAppleEventDescriptor", "NSAppleEventManager", "NSNotification", "NSString", "NSURL"] }

@@ -1,8 +1,9 @@
-//! Overlays: filterable pickers and creation forms.
+//! Overlays: filterable pickers, creation forms and the update prompt.
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::edit::input::LineInput;
+use crate::update::Version;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PickerKind {
@@ -266,7 +267,37 @@ impl Form {
     }
 }
 
+/// A newer release, shown before installing it.
+pub struct UpdatePrompt {
+    pub version: Version,
+    /// Summary of the release notes; `None` while they load, `Err` if they
+    /// could not be fetched (installing still works).
+    pub notes: Option<Result<Vec<String>, String>>,
+    /// First note line on screen; the view keeps it within the notes.
+    pub scroll: usize,
+}
+
+pub enum UpdateAction {
+    None,
+    Install,
+    Cancel,
+}
+
+impl UpdatePrompt {
+    pub fn handle_key(&mut self, key: KeyEvent) -> UpdateAction {
+        match key.code {
+            KeyCode::Enter => return UpdateAction::Install,
+            KeyCode::Esc => return UpdateAction::Cancel,
+            KeyCode::Up => self.scroll = self.scroll.saturating_sub(1),
+            KeyCode::Down => self.scroll += 1,
+            _ => {}
+        }
+        UpdateAction::None
+    }
+}
+
 pub enum Overlay {
     Picker(Picker),
     Form(Form),
+    Update(UpdatePrompt),
 }

@@ -34,6 +34,9 @@ const MAX_DOWNLOAD: u64 = 512 * 1024 * 1024;
 pub enum Notice {
     /// The startup check found a newer release.
     Available(Version),
+    /// The notes of a release, for the update modal: its summary lines, or
+    /// why they could not be fetched.
+    Notes(Version, Result<Vec<String>, String>),
     /// `/update` progress, for the message line.
     Progress(String),
     /// `/update` finished: what to tell the user, or why it failed.
@@ -75,6 +78,33 @@ impl Release {
             .filter(|l| !l.is_empty() && !l.starts_with("**Full Changelog**"))
             .map(str::to_string)
             .take(max)
+            .collect()
+    }
+
+    /// The release notes as lines to show: bullets as `• text`, other lines
+    /// as they are; without headings, authors or the changelog link.
+    pub fn summary(&self) -> Vec<String> {
+        self.notes
+            .lines()
+            .map(str::trim)
+            .filter(|l| {
+                !l.is_empty() && !l.starts_with('#') && !l.starts_with("**Full Changelog**")
+            })
+            .map(|l| {
+                let (bullet, text) = match l.strip_prefix("* ").or_else(|| l.strip_prefix("- ")) {
+                    Some(t) => (true, t),
+                    None => (false, l),
+                };
+                let text = match text.find(" by @") {
+                    Some(i) => text[..i].trim(),
+                    None => text,
+                };
+                if bullet {
+                    format!("• {text}")
+                } else {
+                    text.to_string()
+                }
+            })
             .collect()
     }
 }
@@ -260,6 +290,17 @@ pub fn spawn_startup_check(sink: EventSink, state_dir: PathBuf) {
     });
 }
 
+/// The notes of release `v`, fetched on a thread for the update modal.
+pub fn spawn_notes(sink: EventSink, v: Version) {
+    std::thread::spawn(move || {
+        let notes = Client::new()
+            .and_then(|c| c.release(&v))
+            .map(|r| r.summary())
+            .map_err(|e| format!("{e:#}"));
+        sink(AppEvent::Update(Notice::Notes(v, notes)));
+    });
+}
+
 /// `/update`: the latest release, installed from a thread. The running app
 /// keeps going; the new version is there from the next launch.
 pub fn spawn_update(sink: EventSink, state_dir: PathBuf) {
@@ -330,5 +371,30 @@ mod tests {
         );
         assert_eq!(release(notes).highlights(1).len(), 1);
         assert!(release("").highlights(5).is_empty());
+    }
+
+    #[test]
+    fn the_summary_keeps_the_title_and_the_bullets() {
+        let release = Release {
+            version: "1.2.0".parse().unwrap(),
+            notes: " feat: per-profile history\n\n\
+                    ## What's Changed\n\
+                    - Filter history by profile\n\
+                    * fix: narrow windows by @towerforge in https://github.com/x/pull/3\n\
+                    \n\
+                    **Full Changelog**: https://github.com/x/compare/v1.1.0...v1.2.0\n"
+                .into(),
+            url: String::new(),
+            published_at: None,
+            assets: Vec::new(),
+        };
+        assert_eq!(
+            release.summary(),
+            vec![
+                "feat: per-profile history",
+                "• Filter history by profile",
+                "• fix: narrow windows",
+            ]
+        );
     }
 }
